@@ -18,7 +18,7 @@ func main() {
 		messages.WithAddrRecv("0.0.0.0", 8333, 1),
 		messages.WithAddrFrom("0.0.0.0", 8080, 1),
 		messages.WithNonce(rng.Uint64()),
-		messages.WithUserAgent("btc/eclesio/eiger-handshake-challenger"),
+		messages.WithUserAgent("btc/eclesios-node"),
 	)
 
 	handshakeVersionMessage := messages.NewMainMessage([]byte("version"), version)
