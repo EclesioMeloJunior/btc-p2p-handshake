@@ -2,6 +2,7 @@ package messages_test
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/netip"
@@ -12,6 +13,8 @@ import (
 )
 
 type DummyEncodable []byte
+
+func (d *DummyEncodable) String() string { return "" }
 
 func (d *DummyEncodable) Encode() ([]byte, error) {
 	return *d, nil
@@ -57,4 +60,18 @@ func TestNetworkAddressEncoding(t *testing.T) {
 	encoded, err := expectedNetAddr.Encode()
 	require.NoError(t, err)
 	require.Equal(t, testEncoded, encoded)
+}
+
+func TestEmptyPayloadMessageDecode(t *testing.T) {
+	verackEncodedMessage := "f9beb4d976657261636b000000000000000000005df6e0e2"
+	encBytes, err := hex.DecodeString(verackEncodedMessage)
+	require.NoError(t, err)
+
+	fmt.Println(encBytes)
+
+	remoteVerAck := messages.NewMainMessage(nil, messages.EmptyPayload{})
+	err = remoteVerAck.Decode(bytes.NewReader(encBytes))
+	require.NoError(t, err)
+
+	fmt.Println(remoteVerAck.String())
 }

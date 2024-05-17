@@ -43,6 +43,17 @@ func WithAddrFrom(addr string, port uint16, services uint64) VersionOpt {
 	}
 }
 
+func WithAddrRecvFromString(fulladdr string, services uint64) VersionOpt {
+	addrPort := netip.MustParseAddrPort(fulladdr)
+	return func(v *Version) {
+		v.AddrRecv = NetworkAddress{
+			Services: services,
+			IpV6V4:   addrPort.Addr(),
+			Port:     addrPort.Port(),
+		}
+	}
+}
+
 func WithAddrRecv(addr string, port uint16, services uint64) VersionOpt {
 	return func(v *Version) {
 		v.AddrRecv = NetworkAddress{
@@ -94,8 +105,12 @@ func NewVersion(opts ...VersionOpt) *Version {
 	for _, opt := range opts {
 		opt(version)
 	}
-
 	return version
+}
+
+func (v *Version) String() string {
+	return fmt.Sprintf("[number=%d] [services=%d] [ts=%d] [recv=< %s >] [from=< %s >] [nonce=%d] [user-agent=%s] [start-height=%d] [relay=%v]",
+		v.Number, v.Services, v.Timestamp, v.AddrRecv.String(), v.AddrFrom.String(), v.Nonce, v.UserAgent, v.StartHeight, v.Relay)
 }
 
 func (v *Version) Encode() ([]byte, error) {
@@ -196,10 +211,17 @@ func (v *Version) Decode(r io.Reader) error {
 	}
 	v.StartHeight = binary.LittleEndian.Uint32(enc)
 
+	// it is possible that the remote does not encode the relay field
+	// so we might face a EOF, in thi case just return with relay as false
 	enc = make([]byte, 1)
 	_, err = r.Read(enc)
 	if err != nil {
-		return fmt.Errorf("while reading realy: %w", err)
+		if errors.Is(err, io.EOF) {
+			v.Relay = false
+			return nil
+		}
+
+		return fmt.Errorf("while reading relay: %w", err)
 	}
 
 	switch enc[0] {

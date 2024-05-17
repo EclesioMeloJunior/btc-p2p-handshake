@@ -13,6 +13,8 @@ import (
 )
 
 var (
+	ErrChecksumMismatch      = errors.New("checksum mismatch")
+	ErrPayloadSizeMismatch   = errors.New("payload size mismatch")
 	ErrCommandBytesOverflow  = errors.New("message command bytes overflow")
 	ErrFailedToEncodePayload = errors.New("failed to encode payload")
 	ErrFailedToEncodeMessage = errors.New("failed to encode message")
@@ -42,6 +44,23 @@ const (
 	MagicNameCoin       Magic = 0xFEB4BEF9
 )
 
+func (m Magic) String() string {
+	switch m {
+	case MagicMain:
+		return "Main"
+	case MagicTestNetRegTest:
+		return "TestNetRegTest"
+	case MagicTestNet3:
+		return "MagicTestNet3"
+	case MagicSignet:
+		return "Signet"
+	case MagicNameCoin:
+		return "NameCoin"
+	default:
+		return "undefined"
+	}
+}
+
 type Service uint64
 
 const MessageCapWithoutPayloadInBytes = 24
@@ -51,6 +70,10 @@ var _ codec.Encodeable = (*NetworkAddress)(nil)
 var _ codec.Encodeable = (*Version)(nil)
 
 type EmptyPayload struct{}
+
+func (EmptyPayload) String() string {
+	return ""
+}
 
 func (EmptyPayload) Encode() ([]byte, error) {
 	return nil, nil
@@ -66,12 +89,17 @@ type Message struct {
 	Payload codec.Encodeable
 }
 
-func NewMainMessage(command []byte, payload codec.Encodeable) Message {
-	return Message{
+func NewMainMessage(command []byte, payload codec.Encodeable) *Message {
+	return &Message{
 		Magic:   MagicMain,
 		Command: command,
 		Payload: payload,
 	}
+}
+
+func (m Message) String() string {
+	return fmt.Sprintf("[magic=%s] [command=%s] < %s >",
+		m.Magic.String(), string(m.Command), m.Payload.String())
 }
 
 func (m Message) Encode() ([]byte, error) {
@@ -121,7 +149,65 @@ func checksum(value []byte) []byte {
 	return snd[:4]
 }
 
-func (m *Message) Decode(_ io.Reader) error {
+func (m *Message) Decode(r io.Reader) error {
+	enc := make([]byte, 4)
+	_, err := r.Read(enc)
+	if err != nil {
+		return fmt.Errorf("while reading magic: %w", err)
+	}
+	m.Magic = Magic(binary.LittleEndian.Uint32(enc))
+
+	m.Command = make([]byte, 12)
+	_, err = r.Read(m.Command)
+	if err != nil {
+		return fmt.Errorf("while reading command: %w", err)
+	}
+	m.Command = bytes.TrimRight(m.Command, "\x00")
+
+	// just ignore the payload length, since the
+	// responsability of decoding the payload bytes
+	// is from the Payload field
+	enc = make([]byte, 4)
+	_, err = r.Read(enc)
+	if err != nil {
+		return fmt.Errorf("while reading payload length: %w", err)
+	}
+	payloadLength := binary.LittleEndian.Uint32(enc)
+
+	encPayloadChecksum := make([]byte, 4)
+	_, err = r.Read(encPayloadChecksum)
+	if err != nil {
+		return fmt.Errorf("while reading payload checksum: %w", err)
+	}
+
+	if payloadLength > 0 {
+		return m.readAndCheckPayload(r, payloadLength, encPayloadChecksum)
+	}
+
+	return nil
+}
+
+func (m *Message) readAndCheckPayload(r io.Reader, length uint32, expectedChecksum []byte) error {
+	encodedPayload := make([]byte, length)
+	n, err := r.Read(encodedPayload)
+	if err != nil {
+		return fmt.Errorf("while reading payload bytes: %w", err)
+	}
+
+	if length != uint32(n) {
+		return fmt.Errorf("%w, expected %d, read: %d", ErrPayloadSizeMismatch, length, n)
+	}
+
+	currentChecksum := checksum(encodedPayload)
+	if !bytes.Equal(expectedChecksum, currentChecksum) {
+		return fmt.Errorf("%w, received: 0x%x, calculated: 0x%x", ErrChecksumMismatch, encodedPayload, currentChecksum)
+	}
+
+	err = m.Payload.Decode(bytes.NewReader(encodedPayload))
+	if err != nil {
+		return fmt.Errorf("while decoding payload: %w", err)
+	}
+
 	return nil
 }
 
@@ -138,6 +224,10 @@ type NetworkAddress struct {
 	Services uint64
 	IpV6V4   netip.Addr
 	Port     uint16
+}
+
+func (n NetworkAddress) String() string {
+	return fmt.Sprintf("[services=%08b] [ip=%s] [port=%d]", n.Services, n.IpV6V4.String(), n.Port)
 }
 
 func (n *NetworkAddress) Encode() ([]byte, error) {

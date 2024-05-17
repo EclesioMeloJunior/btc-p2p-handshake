@@ -12,6 +12,8 @@ var ErrWronglyEncodedVarint = errors.New("wrongly encoded varint")
 var ErrUnexpectedReadSize = errors.New("unexpected read size")
 
 type Encodeable interface {
+	fmt.Stringer
+
 	Encode() ([]byte, error)
 	Decode(io.Reader) error
 }
